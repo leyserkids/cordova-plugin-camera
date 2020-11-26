@@ -686,7 +686,14 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
         }
         int rotate = 0;
 
-        String fileLocation = FileHelper.getRealPath(uri, this.cordova);
+        String fileLocation = null;
+
+        try {
+            fileLocation = FileHelper.getRealPath(uri, this.cordova);
+        } catch (IOException e) {
+            this.failPicture(e.getMessage());
+        }
+
         LOG.d(LOG_TAG, "File location is: " + fileLocation);
 
         String uriString = uri.toString();
