@@ -291,6 +291,13 @@ public class FileHelper {
                 final int column_index = cursor.getColumnIndexOrThrow(column);
                 return cursor.getString(column_index);
             }
+        } catch (SecurityException e){
+            // https://stackoverflow.com/questions/54587884/java-lang-securityexception-permission-denial-opening-provider-com-estrongs-an
+            if (uri.toString().contains("/storage/emulated/0")) {
+                return "/storage/emulated/0" + uri.toString().split("/storage/emulated/0")[1];
+            } else {
+                return null;
+            }
         } catch (Exception e) {
             return null;
         } finally {
@@ -372,7 +379,7 @@ public class FileHelper {
                     final int indexDisplayName = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME);
                     final int indexSize = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE);
                     long fileSize = cursor.getLong(indexSize);
-                    if (fileSize > 500 * 1024 * 1024){
+                    if (fileSize > 2 * 1024 * 1024 * 1024L){
                         // copy file is a heavy operation. limit file size here to ensure performance and avoid OOM.
                         throw new IOException("SELECTED_FILE_TOO_LARGE");
                     }
