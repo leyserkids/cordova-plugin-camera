@@ -31,7 +31,9 @@ import android.webkit.MimeTypeMap;
 import org.apache.cordova.CordovaInterface;
 import org.apache.cordova.LOG;
 
+import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Locale;
@@ -44,20 +46,25 @@ public class FileHelper {
      * Returns the real path of the given URI string.
      * If the given URI string represents a content:// URI, the real path is retrieved from the media store.
      *
-     * @param uriString the URI string of the audio/image/video
+     * @param uri the URI string of the audio/image/video
      * @param cordova the current application context
      * @return the full path to the file
      */
     @SuppressWarnings("deprecation")
-    public static String getRealPath(Uri uri, CordovaInterface cordova) {
+    public static String getRealPath(Uri uri, CordovaInterface cordova) throws IOException {
         String realPath = null;
 
-        if (Build.VERSION.SDK_INT < 11)
-            realPath = FileHelper.getRealPathFromURI_BelowAPI11(cordova.getActivity(), uri);
-
-        // SDK >= 11
+        if (Build.VERSION.SDK_INT >= 29)
+        {
+            realPath = FileHelper.getRealPathFromURI_API29_And_Above(cordova.getActivity(), uri);
+            LOG.d(LOG_TAG, "getRealPathFromURI_API29_And_Above:" + realPath);
+        }
         else
+        {
             realPath = FileHelper.getRealPathFromURI_API11_And_Above(cordova.getActivity(), uri);
+            LOG.d(LOG_TAG, "getRealPathFromURI_API11_And_Above:" + realPath);
+        }
+
 
         return realPath;
     }
@@ -66,11 +73,11 @@ public class FileHelper {
      * Returns the real path of the given URI.
      * If the given URI is a content:// URI, the real path is retrieved from the media store.
      *
-     * @param uri the URI of the audio/image/video
+     * @param uriString the URI of the audio/image/video
      * @param cordova the current application context
      * @return the full path to the file
      */
-    public static String getRealPath(String uriString, CordovaInterface cordova) {
+    public static String getRealPath(String uriString, CordovaInterface cordova) throws IOException {
         return FileHelper.getRealPath(Uri.parse(uriString), cordova);
     }
 
@@ -236,7 +243,7 @@ public class FileHelper {
         }
         return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension);
     }
-    
+
     /**
      * Returns the mime type of the data specified by the given URI string.
      *
@@ -326,5 +333,81 @@ public class FileHelper {
      */
     public static boolean isGooglePhotosUri(Uri uri) {
         return "com.google.android.apps.photos.content".equals(uri.getAuthority());
+    }
+
+    public static String getRealPathFromURI_API29_And_Above(final Context context, final Uri uri) throws IOException {
+        if ("content".equalsIgnoreCase(uri.getScheme())) {
+            // Return the remote address
+            if (isGooglePhotosUri(uri))
+                return uri.getLastPathSegment();
+            return getDataColumnWithCopyFallback(context, uri, null, null);
+        }
+        // File
+        else if ("file".equalsIgnoreCase(uri.getScheme())) {
+            return uri.getPath();
+        }
+
+        return null;
+    }
+
+    private static String getDataColumnWithCopyFallback(Context context, Uri uri, String selection,
+                                                        String[] selectionArgs) throws IOException {
+
+        Cursor cursor = null;
+        final String[] projection = {
+                MediaStore.MediaColumns.DATA,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.SIZE,
+        };
+
+        try {
+            cursor = context.getContentResolver().query(uri, projection, selection, selectionArgs,null);
+            if (cursor != null && cursor.moveToFirst()) {
+                // Fall back to writing to file if _data column does not exist
+                final int index = cursor.getColumnIndex(MediaStore.MediaColumns.DATA);
+                String path = index > -1 ? cursor.getString(index) : null;
+                if (path != null) {
+                    return cursor.getString(index);
+                } else {
+                    final int indexDisplayName = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME);
+                    final int indexSize = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE);
+                    long fileSize = cursor.getLong(indexSize);
+                    if (fileSize > 500 * 1024 * 1024){
+                        // copy file is a heavy operation. limit file size here to ensure performance and avoid OOM.
+                        throw new IOException("SELECTED_FILE_TOO_LARGE");
+                    }
+                    String fileName = cursor.getString(indexDisplayName);
+                    File fileWritten = writeToFile(context, fileName, uri);
+                    return fileWritten.getAbsolutePath();
+                }
+            }
+        } finally {
+            if (cursor != null)
+                cursor.close();
+        }
+        return null;
+    }
+
+    private static File writeToFile(Context context, String fileName, Uri uri) {
+        String tmpDir = context.getCacheDir() + "/cordova-plugin-camera";
+        Boolean created = new File(tmpDir).mkdir();
+        fileName = fileName.substring(fileName.lastIndexOf('/') + 1);
+        File path = new File(tmpDir);
+        File file = new File(path, fileName);
+        try {
+            FileOutputStream oos = new FileOutputStream(file);
+            byte[] buf = new byte[8192];
+            InputStream is = context.getContentResolver().openInputStream(uri);
+            int c = 0;
+            while ((c = is.read(buf, 0, buf.length)) > 0) {
+                oos.write(buf, 0, c);
+                oos.flush();
+            }
+            oos.close();
+            is.close();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return file;
     }
 }
